@@ -1,3 +1,4 @@
+
 import argparse
 import base64
 from datetime import datetime
@@ -15,12 +16,50 @@ from io import BytesIO
 from keras.models import load_model
 import h5py
 from keras import __version__ as keras_version
-
+import cv2
 sio = socketio.Server()
 app = Flask(__name__)
 model = None
 prev_image_array = None
 
+
+#initial Setup for Keras
+from keras.models import Sequential
+from keras.layers import Dense, Activation, Flatten, Lambda, Input
+from keras.layers import Conv2D, Dropout
+from keras.layers.normalization import BatchNormalization
+from keras.layers.pooling import MaxPooling2D
+from keras.layers import Cropping2D
+from keras.backend import tf as ktf
+from keras.callbacks import ModelCheckpoint, EarlyStopping
+
+model = Sequential()
+# Data normalization
+model.add(Lambda(lambda x: ktf.image.resize_images(x, (80, 160)) , input_shape=(160,320,3)))
+model.add(Cropping2D(cropping=((25,12),(0,0))))
+model.add(Lambda(lambda x: (x/127.5) - 1.0))
+
+# convnet architecture adapting NVIDIA architecture
+model.add(Conv2D(24,(5,5), strides=(2,2), kernel_initializer='truncated_normal', activation="relu"))
+model.add(Dropout(0.5))          
+model.add(Conv2D(36, (5,5), kernel_initializer='truncated_normal', activation="relu"))
+model.add(Dropout(0.5))
+model.add(Conv2D(48, (5,5), kernel_initializer='truncated_normal', activation="relu"))
+model.add(Dropout(0.5))
+model.add(Conv2D(64, (3,3), kernel_initializer='truncated_normal', activation="relu"))
+model.add(Dropout(0.5))
+model.add(Conv2D(64, (3,3), kernel_initializer='truncated_normal', activation="relu"))
+model.add(Dropout(0.5))
+          
+model.add(Flatten())
+          
+model.add(Dense(100, kernel_initializer='truncated_normal'))
+model.add(Dense(50, kernel_initializer='truncated_normal'))
+model.add(Dense(1))
+
+model.compile(loss='mse', optimizer='adam')
+
+#model.load_weights('model.h5')
 
 class SimplePIController:
     def __init__(self, Kp, Ki):
@@ -44,7 +83,7 @@ class SimplePIController:
 
 
 controller = SimplePIController(0.1, 0.002)
-set_speed = 9
+set_speed = 15
 controller.set_desired(set_speed)
 
 
@@ -64,8 +103,8 @@ def telemetry(sid, data):
         steering_angle = float(model.predict(image_array[None, :, :, :], batch_size=1))
 
         throttle = controller.update(float(speed))
-
         print(steering_angle, throttle)
+        
         send_control(steering_angle, throttle)
 
         # save frame
@@ -119,7 +158,8 @@ if __name__ == '__main__':
         print('You are using Keras version ', keras_version,
               ', but the model was built using ', model_version)
 
-    model = load_model(args.model)
+    model.load_weights(args.model)
+    #model = load_model(args.model)
 
     if args.image_folder != '':
         print("Creating image folder at {}".format(args.image_folder))
